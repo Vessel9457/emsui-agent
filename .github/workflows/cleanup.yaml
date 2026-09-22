@@ -1,0 +1,26 @@
+# Backstop for the public run history. The Forgejo trigger deletes each run after
+# it has downloaded the artifacts, but this sweeps up anything left behind so
+# build logs/artifacts don't linger on a public repository.
+
+name: cleanup
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  delete-old-runs:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Delete workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          keep_minimum_runs: 0
+          retain_days: 0

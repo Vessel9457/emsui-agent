@@ -1,0 +1,175 @@
+# Release for the private Forgejo repo `Delnegend/emsui-agent`.
+#
+# The version is computed by ietf-tools/semver-action from the source repo's
+# Conventional Commits since the last release; the twin only keeps the `v*` tags
+# that mark what has been released. Artifacts are built here; the Forgejo action
+# mirrors them onto the Forgejo release. Nothing is published from here.
+
+name: release
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # Weekly: Sunday 00:00 UTC
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Forgejo commit SHA (or ref) to release
+        required: false
+        default: main
+      correlation_id:
+        description: Caller correlation id (echoed in the run name)
+        required: false
+
+run-name: "release ${{ inputs.correlation_id || github.sha }}"
+
+# Serialise releases so tag creation cannot collide.
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  FJ_HOST: git.delnegend.com
+  FJ_OWNER: Delnegend
+  BINARY_PREFIX: emsui-agent
+
+jobs:
+  prepare:
+    name: Prepare
+    runs-on: ubuntu-slim
+    outputs:
+      version: ${{ steps.semver.outputs.nextStrict }}
+      skip: ${{ steps.changes.outputs.skip }}
+    steps:
+      - name: Fetch source from Forgejo
+        env:
+          TOKEN: ${{ secrets.FORGEJO }}
+          REF: ${{ inputs.ref || 'main' }}
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY#*/}"
+          git clone --quiet "https://oauth2:${TOKEN}@${FJ_HOST}/${FJ_OWNER}/${REPO}.git" src
+          git -C src checkout --quiet "$REF"
+
+      - name: Collect source commits since the last release
+        id: changes
+        run: |
+          set -euo pipefail
+          LAST="$(git -C src describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)"
+          if [ -n "$LAST" ]; then RANGE="${LAST}..HEAD"; else RANGE="HEAD"; fi
+
+          COUNT="$(git -C src rev-list --count "$RANGE")"
+          echo "source commits since ${LAST:-the beginning}: ${COUNT}"
+          if [ "$COUNT" -eq 0 ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+          {
+            echo 'messages<<EOF'
+            git -C src log --pretty=format:%s "$RANGE"
+            echo
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Next version
+        id: semver
+        if: steps.changes.outputs.skip != 'true'
+        uses: ietf-tools/semver-action@v1
+        with:
+          token: ${{ github.token }}
+          fallbackTag: v0.0.0
+          additionalCommits: ${{ steps.changes.outputs.messages }}
+          noVersionBumpBehavior: patch
+
+  build:
+    name: Build (x86_64-unknown-linux-musl)
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch source from Forgejo
+        env:
+          TOKEN: ${{ secrets.FORGEJO }}
+          REF: ${{ inputs.ref || 'main' }}
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY#*/}"
+          git clone "https://oauth2:${TOKEN}@${FJ_HOST}/${FJ_OWNER}/${REPO}.git" .
+          git remote set-url origin "https://${FJ_HOST}/${FJ_OWNER}/${REPO}.git"
+          git checkout "$REF"
+
+      - name: Write Global CA client identity
+        env:
+          GLOBAL_CLIENT_CRT: ${{ secrets.GLOBAL_CLIENT_CRT }}
+          GLOBAL_CLIENT_KEY: ${{ secrets.GLOBAL_CLIENT_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "${GLOBAL_CLIENT_CRT:-}" ] && [ -n "${GLOBAL_CLIENT_KEY:-}" ] || {
+            echo "::error::set the GLOBAL_CLIENT_CRT and GLOBAL_CLIENT_KEY repository secrets"
+            exit 1
+          }
+          mkdir -p certs
+          printf '%s\n' "$GLOBAL_CLIENT_CRT" > certs/global_client.crt
+          printf '%s\n' "$GLOBAL_CLIENT_KEY" > certs/global_client.key
+
+      - name: Install clang + mold + musl toolchain
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends clang mold musl-tools
+          # `cc` (used by ring et al.) looks up `<triple>-gcc`, not `musl-gcc`.
+          sudo ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-linux-musl-gcc
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: x86_64-unknown-linux-musl
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: x86_64-unknown-linux-musl
+
+      - name: Build
+        env:
+          RUSTFLAGS: "-C linker=clang -C link-arg=--target=x86_64-unknown-linux-musl -C link-arg=-fuse-ld=mold"
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: |
+          set -euo pipefail
+          cargo build --workspace --release --target x86_64-unknown-linux-musl \
+            --message-format=json-render-diagnostics > cargo-build.json
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          BASE="${BINARY_PREFIX}-${{ needs.prepare.outputs.version }}-linux-musl"
+          mkdir -p "$BASE"
+          jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' \
+            cargo-build.json | sort -u | while read -r exe; do
+              cp "$exe" "$BASE/"
+            done
+          tar -czf "${BASE}.tar.gz" "$BASE"
+          rm -rf "$BASE"
+          ls -lh "${BASE}.tar.gz"
+          echo "ASSET=${BASE}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: emsui-agent-linux-musl
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Mark the version as released
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: v${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${VERSION}" -f sha="${GITHUB_SHA}"

@@ -1,0 +1,79 @@
+# CI gate for the private Forgejo repo `Delnegend/emsui-agent`.
+#
+# This repository is public only so GitHub-hosted runners are free; it holds no
+# source. The workflow checks the private source out of Forgejo with a read-only
+# token (`secrets.FORGEJO`) and runs the single `just check` gate. Building and
+# shipping binaries is the Release workflow's job.
+#
+# A Forgejo Action dispatches this via `workflow_dispatch` and waits for the run.
+
+name: ci
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Forgejo commit SHA (or ref) to build
+        required: false
+        default: main
+      correlation_id:
+        description: Caller correlation id (echoed in the run name)
+        required: false
+
+run-name: "ci ${{ inputs.correlation_id || github.sha }}"
+
+permissions:
+  contents: read
+
+env:
+  FJ_HOST: git.delnegend.com
+  FJ_OWNER: Delnegend
+
+jobs:
+  check:
+    name: Check (just check)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch source from Forgejo
+        env:
+          TOKEN: ${{ secrets.FORGEJO }}
+          REF: ${{ inputs.ref || 'main' }}
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY#*/}"
+          git clone "https://oauth2:${TOKEN}@${FJ_HOST}/${FJ_OWNER}/${REPO}.git" .
+          git remote set-url origin "https://${FJ_HOST}/${FJ_OWNER}/${REPO}.git"
+          git checkout "$REF"
+
+      - name: Write Global CA client identity
+        env:
+          GLOBAL_CLIENT_CRT: ${{ secrets.GLOBAL_CLIENT_CRT }}
+          GLOBAL_CLIENT_KEY: ${{ secrets.GLOBAL_CLIENT_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "${GLOBAL_CLIENT_CRT:-}" ] && [ -n "${GLOBAL_CLIENT_KEY:-}" ] || {
+            echo "::error::set the GLOBAL_CLIENT_CRT and GLOBAL_CLIENT_KEY repository secrets"
+            exit 1
+          }
+          mkdir -p certs
+          printf '%s\n' "$GLOBAL_CLIENT_CRT" > certs/global_client.crt
+          printf '%s\n' "$GLOBAL_CLIENT_KEY" > certs/global_client.key
+
+      - name: Install clang + mold
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends clang mold
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - uses: extractions/setup-just@v3
+
+      - name: Run checks
+        run: just check
