@@ -7,7 +7,7 @@
 #
 # A Forgejo Action dispatches this via `workflow_dispatch` and waits for the run.
 
-name: livecheck
+name: build-livecheck
 
 on:
   workflow_dispatch:
@@ -23,7 +23,7 @@ on:
         description: Optional extra image tag (e.g. v0.1.0)
         required: false
 
-run-name: "livecheck ${{ inputs.correlation_id || github.sha }}"
+run-name: "build-livecheck ${{ inputs.correlation_id || github.sha }}"
 
 permissions:
   contents: read
