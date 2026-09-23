@@ -171,13 +171,6 @@ jobs:
           ls -lh "${BASE}.tar.gz"
           echo "ASSET=${BASE}.tar.gz" >> "$GITHUB_ENV"
 
-      - name: Upload artifact for Forgejo mirror
-        uses: actions/upload-artifact@v4
-        with:
-          name: emsui-agent-linux-musl
-          path: ${{ env.ASSET }}
-          if-no-files-found: error
-          retention-days: 1
 
       - name: Create GitHub Release on Vessel9457
         env:
