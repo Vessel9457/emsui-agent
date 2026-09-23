@@ -74,14 +74,37 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute image tags
+      - name: Resolve SemVer and compute image tags
         id: tags
         run: |
+          set -euo pipefail
           SHORT_SHA="$(git rev-parse --short HEAD)"
-          TAGS="${IMAGE_NAME}:latest,${IMAGE_NAME}:${SHORT_SHA}"
-          if [ -n "${{ inputs.tag }}" ]; then
-            TAGS="${TAGS},${IMAGE_NAME}:${{ inputs.tag }}"
+
+          # 1. Determine SemVer: explicit input tag -> git tag -> Cargo.toml
+          RAW_TAG="${{ inputs.tag }}"
+          if [ -n "$RAW_TAG" ]; then
+            SEMVER="${RAW_TAG#v}"
+          elif TAG="$(git describe --tags --match 'v*' --exact-match 2>/dev/null)"; then
+            SEMVER="${TAG#v}"
+          else
+            SEMVER="$(grep -m1 '^version =' Cargo.toml | cut -d'"' -f2)"
           fi
+
+          echo "resolved semver: $SEMVER"
+          echo "version=${SEMVER}" >> "$GITHUB_OUTPUT"
+
+          # 2. Extract major & minor
+          MAJOR="$(echo "$SEMVER" | cut -d. -f1)"
+          MINOR="$(echo "$SEMVER" | cut -d. -f2)"
+
+          # 3. Update Cargo.toml if different so the binary embeds the exact semver
+          CURR_VER="$(grep -m1 '^version =' Cargo.toml | cut -d'"' -f2)"
+          if [ "$CURR_VER" != "$SEMVER" ]; then
+            sed -i -E "0,/^version = \".*\"/s//version = \"${SEMVER}\"/" Cargo.toml
+          fi
+
+          # 4. Assemble tags
+          TAGS="${IMAGE_NAME}:latest,${IMAGE_NAME}:v${SEMVER},${IMAGE_NAME}:${SEMVER},${IMAGE_NAME}:${MAJOR}.${MINOR},${IMAGE_NAME}:${MAJOR},${IMAGE_NAME}:${SHORT_SHA}"
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push container image
@@ -90,6 +113,7 @@ jobs:
           context: .
           file: apps/emsui-livecheck/Dockerfile
           push: true
+          build-args: VERSION=${{ steps.tags.outputs.version }}
           tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

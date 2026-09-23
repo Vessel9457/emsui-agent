@@ -1,9 +1,10 @@
 # Release for the private Forgejo repo `Delnegend/emsui-agent`.
 #
 # The version is computed by ietf-tools/semver-action from the source repo's
-# Conventional Commits since the last release; the twin only keeps the `v*` tags
-# that mark what has been released. Artifacts are built here; the Forgejo action
-# mirrors them onto the Forgejo release. Nothing is published from here.
+# Conventional Commits since the last release; artifacts (CLI binaries and
+# emsui-livecheck container image) are built here and published to Vessel9457's
+# GitHub Releases and GitHub Container Registry (ghcr.io).
+# The Forgejo action mirrors the binary release back to Forgejo.
 
 name: release
 
@@ -29,16 +30,18 @@ concurrency:
 
 permissions:
   contents: write
+  packages: write
 
 env:
   FJ_HOST: git.delnegend.com
   FJ_OWNER: Delnegend
   BINARY_PREFIX: emsui-agent
+  IMAGE_NAME: ghcr.io/vessel9457/emsui-livecheck
 
 jobs:
   prepare:
     name: Prepare
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.semver.outputs.nextStrict }}
       skip: ${{ steps.changes.outputs.skip }}
@@ -86,7 +89,7 @@ jobs:
           noVersionBumpBehavior: patch
 
   build:
-    name: Build (x86_64-unknown-linux-musl)
+    name: Build Binaries (x86_64-unknown-linux-musl)
     needs: prepare
     if: needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
@@ -116,11 +119,17 @@ jobs:
           printf '%s\n' "$GLOBAL_CLIENT_CRT" > certs/global_client.crt
           printf '%s\n' "$GLOBAL_CLIENT_KEY" > certs/global_client.key
 
+      - name: Update Cargo.toml workspace version
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          sed -i -E "0,/^version = \".*\"/s//version = \"${VERSION}\"/" Cargo.toml
+
       - name: Install clang + mold + musl toolchain
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends clang mold musl-tools
-          # `cc` (used by ring et al.) looks up `<triple>-gcc`, not `musl-gcc`.
           sudo ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-linux-musl-gcc
 
       - name: Setup Rust
@@ -133,6 +142,11 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           key: x86_64-unknown-linux-musl
+
+      - name: Synchronize Cargo.lock
+        run: |
+          set -euo pipefail
+          cargo check --workspace --target x86_64-unknown-linux-musl
 
       - name: Build
         env:
@@ -157,7 +171,7 @@ jobs:
           ls -lh "${BASE}.tar.gz"
           echo "ASSET=${BASE}.tar.gz" >> "$GITHUB_ENV"
 
-      - name: Upload artifact
+      - name: Upload artifact for Forgejo mirror
         uses: actions/upload-artifact@v4
         with:
           name: emsui-agent-linux-musl
@@ -165,11 +179,85 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      - name: Mark the version as released
+      - name: Create GitHub Release on Vessel9457
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: v${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-            -f ref="refs/tags/${VERSION}" -f sha="${GITHUB_SHA}"
+          gh release create "$VERSION" "${ASSET}" \
+            --title "$VERSION" \
+            --generate-notes
+
+  publish-image:
+    name: Publish Container Image (ghcr.io)
+    needs: prepare
+    if: needs.prepare.outputs.skip != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Fetch source from Forgejo
+        env:
+          TOKEN: ${{ secrets.FORGEJO }}
+          REF: ${{ inputs.ref || 'main' }}
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY#*/}"
+          git clone "https://oauth2:${TOKEN}@${FJ_HOST}/${FJ_OWNER}/${REPO}.git" .
+          git remote set-url origin "https://${FJ_HOST}/${FJ_OWNER}/${REPO}.git"
+          git checkout "$REF"
+
+      - name: Write Global CA client identity
+        env:
+          GLOBAL_CLIENT_CRT: ${{ secrets.GLOBAL_CLIENT_CRT }}
+          GLOBAL_CLIENT_KEY: ${{ secrets.GLOBAL_CLIENT_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "${GLOBAL_CLIENT_CRT:-}" ] && [ -n "${GLOBAL_CLIENT_KEY:-}" ] || {
+            echo "::error::set the GLOBAL_CLIENT_CRT and GLOBAL_CLIENT_KEY repository secrets"
+            exit 1
+          }
+          mkdir -p certs
+          printf '%s\n' "$GLOBAL_CLIENT_CRT" > certs/global_client.crt
+          printf '%s\n' "$GLOBAL_CLIENT_KEY" > certs/global_client.key
+
+      - name: Update Cargo.toml workspace version
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          sed -i -E "0,/^version = \".*\"/s//version = \"${VERSION}\"/" Cargo.toml
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image tags
+        id: tags
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          MAJOR="$(echo "$VERSION" | cut -d. -f1)"
+          MINOR="$(echo "$VERSION" | cut -d. -f2)"
+          TAGS="${IMAGE_NAME}:latest,${IMAGE_NAME}:v${VERSION},${IMAGE_NAME}:${VERSION},${IMAGE_NAME}:${MAJOR}.${MINOR},${IMAGE_NAME}:${MAJOR},${IMAGE_NAME}:${GITHUB_SHA}"
+          echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/emsui-livecheck/Dockerfile
+          push: true
+          build-args: VERSION=${{ needs.prepare.outputs.version }}
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
