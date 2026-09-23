@@ -35,27 +35,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Fetch source from Forgejo
-        env:
-          TOKEN: ${{ secrets.FORGEJO }}
-          REF: ${{ inputs.ref || 'main' }}
-        run: |
-          set -euo pipefail
-          REPO="${GITHUB_REPOSITORY#*/}"
-          CLONE_URL="https://oauth2:${TOKEN}@${FJ_HOST}/${FJ_OWNER}/${REPO}.git"
-          for i in 1 2 3 4 5; do
-            find . -mindepth 1 -delete
-            if git clone "$CLONE_URL" .; then
-              break
-            fi
-            if [ "$i" -eq 5 ]; then
-              echo "::error::git clone failed after 5 attempts"
-              exit 1
-            fi
-            echo "git clone failed (attempt $i), retrying in $((i * 3))s..."
-            sleep $((i * 3))
-          done
-          git remote set-url origin "https://${FJ_HOST}/${FJ_OWNER}/${REPO}.git"
-          git checkout "$REF"
+        uses: https://git.delnegend.com/Delnegend/actions/checkout@v2
+        with:
+          token: ${{ secrets.FORGEJO }}
+          repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
+          server_url: https://${{ env.FJ_HOST }}
+          ref: ${{ inputs.ref || 'main' }}
 
       - name: Write Global CA client identity
         env:
