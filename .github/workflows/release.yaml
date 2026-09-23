@@ -232,11 +232,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: v${{ needs.prepare.outputs.version }}
+          TARGET_REF: ${{ needs.prepare.outputs.target_ref }}
         run: |
           set -euo pipefail
+          # The workspace's `origin` points at Forgejo, so `gh` cannot infer the
+          # repository — pass it explicitly.
           gh release create "$VERSION" "${ASSET}" \
+            --repo "${GITHUB_REPOSITORY}" \
             --title "$VERSION" \
-            --generate-notes
+            --notes "Built from ${FJ_OWNER}/${GITHUB_REPOSITORY#*/}@${TARGET_REF}."
 
   publish-image:
     name: Publish Container Image (ghcr.io)
