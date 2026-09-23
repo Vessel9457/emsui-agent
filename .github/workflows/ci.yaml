@@ -34,7 +34,6 @@ jobs:
     name: Check (just check)
     runs-on: ubuntu-latest
     steps:
-      # GitHub resolves only `owner/repo@ref`, `./path`, or `docker://`.
       - name: Fetch source from Forgejo
         uses: Vessel9457/actions/checkout@v2
         with:

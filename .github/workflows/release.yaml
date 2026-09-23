@@ -45,7 +45,6 @@ jobs:
       target_ref: ${{ steps.version.outputs.target_ref || steps.semver.outputs.next }}
       skip: ${{ steps.version.outputs.skip || steps.changes.outputs.skip }}
     steps:
-      # GitHub resolves only `owner/repo@ref`, `./path`, or `docker://`.
       - name: Fetch source from Forgejo
         uses: Vessel9457/actions/checkout@v2
         with:
@@ -145,7 +144,6 @@ jobs:
     if: needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
-      # GitHub resolves only `owner/repo@ref`, `./path`, or `docker://`.
       - name: Fetch source from Forgejo
         uses: Vessel9457/actions/checkout@v2
         with:
@@ -249,7 +247,6 @@ jobs:
       contents: read
       packages: write
     steps:
-      # GitHub resolves only `owner/repo@ref`, `./path`, or `docker://`.
       - name: Fetch source from Forgejo
         uses: Vessel9457/actions/checkout@v2
         with:
