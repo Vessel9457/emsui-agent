@@ -43,8 +43,8 @@ jobs:
     name: Prepare
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.semver.outputs.nextStrict }}
-      skip: ${{ steps.changes.outputs.skip }}
+      version: ${{ steps.version.outputs.version || steps.semver.outputs.nextStrict }}
+      skip: ${{ steps.version.outputs.skip || steps.changes.outputs.skip }}
     steps:
       - name: Fetch source from Forgejo
         env:
@@ -68,8 +68,46 @@ jobs:
           done
           git -C src checkout --quiet "$REF"
 
+      - name: Resolve Version from ref, tag, or Cargo.toml
+        id: version
+        env:
+          INPUT_REF: ${{ inputs.ref || 'main' }}
+        run: |
+          set -euo pipefail
+
+          # 1. If input ref is a version tag (e.g. v0.2.0 or 0.2.0), use it directly
+          if echo "$INPUT_REF" | grep -qE '^v?[0-9]+\.[0-9]+\.[0-9]+'; then
+            VER="${INPUT_REF#v}"
+            echo "version=$VER" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "resolved version: $VER (from input ref $INPUT_REF)"
+            exit 0
+          fi
+
+          # 2. Check if git commit has an exact tag
+          TAG="$(git -C src describe --tags --match 'v*' --exact-match 2>/dev/null || true)"
+          if [ -n "$TAG" ]; then
+            VER="${TAG#v}"
+            echo "version=$VER" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "resolved version: $VER (from exact git tag $TAG)"
+            exit 0
+          fi
+
+          # 3. Check if Cargo.toml on this commit is already bumped beyond the latest tag
+          LAST="$(git -C src describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)"
+          CARGO_VER="$(grep -m1 '^version =' src/Cargo.toml | cut -d'"' -f2)"
+          if [ -n "$LAST" ] && [ "$CARGO_VER" != "${LAST#v}" ]; then
+            echo "version=$CARGO_VER" >> "$GITHUB_OUTPUT"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "resolved version: $CARGO_VER (from bumped Cargo.toml)"
+            exit 0
+          fi
+
+          echo "need_semver=true" >> "$GITHUB_OUTPUT"
       - name: Collect source commits since the last release
         id: changes
+        if: steps.version.outputs.need_semver == 'true'
         run: |
           set -euo pipefail
           LAST="$(git -C src describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)"
@@ -90,9 +128,9 @@ jobs:
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Next version
+      - name: Next version (fallback)
         id: semver
-        if: steps.changes.outputs.skip != 'true'
+        if: steps.version.outputs.need_semver == 'true' && steps.changes.outputs.skip != 'true'
         uses: ietf-tools/semver-action@v1
         with:
           token: ${{ github.token }}
