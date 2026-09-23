@@ -9,14 +9,12 @@
 name: release
 
 on:
-  schedule:
-    - cron: '0 0 * * 0' # Weekly: Sunday 00:00 UTC
   workflow_dispatch:
     inputs:
       ref:
-        description: Forgejo commit SHA (or ref) to release
+        description: Forgejo release tag (e.g. v0.2.0) or ref to release (defaults to latest tag)
         required: false
-        default: main
+        default: ''
       correlation_id:
         description: Caller correlation id (echoed in the run name)
         required: false
@@ -44,12 +42,13 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version || steps.semver.outputs.nextStrict }}
+      target_ref: ${{ steps.version.outputs.target_ref || steps.semver.outputs.next }}
       skip: ${{ steps.version.outputs.skip || steps.changes.outputs.skip }}
     steps:
       - name: Fetch source from Forgejo
         env:
           TOKEN: ${{ secrets.FORGEJO }}
-          REF: ${{ inputs.ref || 'main' }}
+          REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
           REPO="${GITHUB_REPOSITORY#*/}"
@@ -66,12 +65,22 @@ jobs:
             echo "git clone failed (attempt $i), retrying in $((i * 3))s..."
             sleep $((i * 3))
           done
-          git -C src checkout --quiet "$REF"
-
+          if [ -n "$REF" ]; then
+            git -C src checkout --quiet "$REF"
+          else
+            LATEST_TAG="$(git -C src tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)"
+            if [ -n "$LATEST_TAG" ]; then
+              echo "No ref specified; defaulting to latest verified release tag: $LATEST_TAG"
+              git -C src checkout --quiet "$LATEST_TAG"
+            else
+              echo "No tag found; using main"
+              git -C src checkout --quiet main
+            fi
+          fi
       - name: Resolve Version from ref, tag, or Cargo.toml
         id: version
         env:
-          INPUT_REF: ${{ inputs.ref || 'main' }}
+          INPUT_REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
 
@@ -79,6 +88,7 @@ jobs:
           if echo "$INPUT_REF" | grep -qE '^v?[0-9]+\.[0-9]+\.[0-9]+'; then
             VER="${INPUT_REF#v}"
             echo "version=$VER" >> "$GITHUB_OUTPUT"
+            echo "target_ref=${INPUT_REF}" >> "$GITHUB_OUTPUT"
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "resolved version: $VER (from input ref $INPUT_REF)"
             exit 0
@@ -89,20 +99,20 @@ jobs:
           if [ -n "$TAG" ]; then
             VER="${TAG#v}"
             echo "version=$VER" >> "$GITHUB_OUTPUT"
+            echo "target_ref=${TAG}" >> "$GITHUB_OUTPUT"
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "resolved version: $VER (from exact git tag $TAG)"
             exit 0
-          fi
 
           # 3. Check if Cargo.toml on this commit is already bumped beyond the latest tag
           LAST="$(git -C src describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)"
           CARGO_VER="$(grep -m1 '^version =' src/Cargo.toml | cut -d'"' -f2)"
           if [ -n "$LAST" ] && [ "$CARGO_VER" != "${LAST#v}" ]; then
             echo "version=$CARGO_VER" >> "$GITHUB_OUTPUT"
+            echo "target_ref=v${CARGO_VER}" >> "$GITHUB_OUTPUT"
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "resolved version: $CARGO_VER (from bumped Cargo.toml)"
             exit 0
-          fi
 
           echo "need_semver=true" >> "$GITHUB_OUTPUT"
       - name: Collect source commits since the last release
@@ -147,7 +157,7 @@ jobs:
       - name: Fetch source from Forgejo
         env:
           TOKEN: ${{ secrets.FORGEJO }}
-          REF: ${{ inputs.ref || 'main' }}
+          REF: ${{ needs.prepare.outputs.target_ref }}
         run: |
           set -euo pipefail
           REPO="${GITHUB_REPOSITORY#*/}"
@@ -265,7 +275,7 @@ jobs:
       - name: Fetch source from Forgejo
         env:
           TOKEN: ${{ secrets.FORGEJO }}
-          REF: ${{ inputs.ref || 'main' }}
+          REF: ${{ needs.prepare.outputs.target_ref }}
         run: |
           set -euo pipefail
           REPO="${GITHUB_REPOSITORY#*/}"
