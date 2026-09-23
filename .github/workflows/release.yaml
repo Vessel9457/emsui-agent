@@ -307,7 +307,10 @@ jobs:
           set -euo pipefail
           MAJOR="$(echo "$VERSION" | cut -d. -f1)"
           MINOR="$(echo "$VERSION" | cut -d. -f2)"
-          TAGS="${IMAGE_NAME}:latest,${IMAGE_NAME}:v${VERSION},${IMAGE_NAME}:${VERSION},${IMAGE_NAME}:${MAJOR}.${MINOR},${IMAGE_NAME}:${MAJOR},${IMAGE_NAME}:${GITHUB_SHA}"
+          # The workspace is the source checkout, so HEAD is the released
+          # source commit. `GITHUB_SHA` would be the twin's workflow commit.
+          SOURCE_SHA="$(git rev-parse HEAD)"
+          TAGS="${IMAGE_NAME}:latest,${IMAGE_NAME}:v${VERSION},${IMAGE_NAME}:${VERSION},${IMAGE_NAME}:${MAJOR}.${MINOR},${IMAGE_NAME}:${MAJOR},${IMAGE_NAME}:${SOURCE_SHA}"
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push container image
