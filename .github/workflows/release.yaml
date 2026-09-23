@@ -45,26 +45,41 @@ jobs:
       target_ref: ${{ steps.version.outputs.target_ref || steps.semver.outputs.next }}
       skip: ${{ steps.version.outputs.skip || steps.changes.outputs.skip }}
     steps:
+      # GitHub's runner only resolves `owner/repo@ref`, `./path`, or
+      # `docker://` — the `https://host/owner/repo@ref` form is a Forgejo
+      # extension, so the Forgejo-hosted `Delnegend/actions/checkout` cannot be
+      # used here. Clone inline instead.
       - name: Fetch source from Forgejo
-        uses: https://git.delnegend.com/Delnegend/actions/checkout@v2
-        with:
-          token: ${{ secrets.FORGEJO }}
-          repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
-          server_url: https://${{ env.FJ_HOST }}
-          path: src
-          ref: ${{ inputs.ref }}
-
-      - name: Default to the latest verified release tag
-        if: inputs.ref == ''
-        working-directory: src
+        env:
+          TOKEN: ${{ secrets.FORGEJO }}
+          REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
-          LATEST_TAG="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)"
-          if [ -n "$LATEST_TAG" ]; then
-            echo "No ref specified; defaulting to latest verified release tag: $LATEST_TAG"
-            git checkout --quiet "$LATEST_TAG"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          CLONE_URL="https://oauth2:${TOKEN}@${FJ_HOST}/${FJ_OWNER}/${REPO}.git"
+          for i in 1 2 3 4 5; do
+            rm -rf src
+            if git clone --quiet "$CLONE_URL" src; then
+              break
+            fi
+            if [ "$i" -eq 5 ]; then
+              echo "::error::git clone failed after 5 attempts"
+              exit 1
+            fi
+            echo "git clone failed (attempt $i), retrying in $((i * 3))s..."
+            sleep $((i * 3))
+          done
+          if [ -n "$REF" ]; then
+            git -C src checkout --quiet "$REF"
           else
-            echo "No release tag found; staying on the default branch"
+            LATEST_TAG="$(git -C src tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)"
+            if [ -n "$LATEST_TAG" ]; then
+              echo "No ref specified; defaulting to latest verified release tag: $LATEST_TAG"
+              git -C src checkout --quiet "$LATEST_TAG"
+            else
+              echo "No tag found; using main"
+              git -C src checkout --quiet main
+            fi
           fi
 
       - name: Resolve Version from ref, tag, or Cargo.toml
@@ -144,13 +159,32 @@ jobs:
     if: needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     steps:
+      # GitHub's runner only resolves `owner/repo@ref`, `./path`, or
+      # `docker://` — the `https://host/owner/repo@ref` form is a Forgejo
+      # extension, so the Forgejo-hosted `Delnegend/actions/checkout` cannot be
+      # used here. Clone inline instead.
       - name: Fetch source from Forgejo
-        uses: https://git.delnegend.com/Delnegend/actions/checkout@v2
-        with:
-          token: ${{ secrets.FORGEJO }}
-          repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
-          server_url: https://${{ env.FJ_HOST }}
-          ref: ${{ needs.prepare.outputs.target_ref }}
+        env:
+          TOKEN: ${{ secrets.FORGEJO }}
+          REF: ${{ needs.prepare.outputs.target_ref }}
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY#*/}"
+          CLONE_URL="https://oauth2:${TOKEN}@${FJ_HOST}/${FJ_OWNER}/${REPO}.git"
+          for i in 1 2 3 4 5; do
+            find . -mindepth 1 -delete
+            if git clone "$CLONE_URL" .; then
+              break
+            fi
+            if [ "$i" -eq 5 ]; then
+              echo "::error::git clone failed after 5 attempts"
+              exit 1
+            fi
+            echo "git clone failed (attempt $i), retrying in $((i * 3))s..."
+            sleep $((i * 3))
+          done
+          git remote set-url origin "https://${FJ_HOST}/${FJ_OWNER}/${REPO}.git"
+          git checkout "$REF"
 
       - name: Write Global CA client identity
         env:
@@ -247,13 +281,32 @@ jobs:
       contents: read
       packages: write
     steps:
+      # GitHub's runner only resolves `owner/repo@ref`, `./path`, or
+      # `docker://` — the `https://host/owner/repo@ref` form is a Forgejo
+      # extension, so the Forgejo-hosted `Delnegend/actions/checkout` cannot be
+      # used here. Clone inline instead.
       - name: Fetch source from Forgejo
-        uses: https://git.delnegend.com/Delnegend/actions/checkout@v2
-        with:
-          token: ${{ secrets.FORGEJO }}
-          repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
-          server_url: https://${{ env.FJ_HOST }}
-          ref: ${{ needs.prepare.outputs.target_ref }}
+        env:
+          TOKEN: ${{ secrets.FORGEJO }}
+          REF: ${{ needs.prepare.outputs.target_ref }}
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY#*/}"
+          CLONE_URL="https://oauth2:${TOKEN}@${FJ_HOST}/${FJ_OWNER}/${REPO}.git"
+          for i in 1 2 3 4 5; do
+            find . -mindepth 1 -delete
+            if git clone "$CLONE_URL" .; then
+              break
+            fi
+            if [ "$i" -eq 5 ]; then
+              echo "::error::git clone failed after 5 attempts"
+              exit 1
+            fi
+            echo "git clone failed (attempt $i), retrying in $((i * 3))s..."
+            sleep $((i * 3))
+          done
+          git remote set-url origin "https://${FJ_HOST}/${FJ_OWNER}/${REPO}.git"
+          git checkout "$REF"
 
       - name: Write Global CA client identity
         env:
