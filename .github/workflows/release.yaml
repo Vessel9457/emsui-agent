@@ -22,14 +22,11 @@ on:
 
 run-name: "release ${{ inputs.correlation_id || github.sha }}"
 
-# Serialise releases so tag creation cannot collide.
+# Serialise releases: dispatch requires the release tag, so concurrent
+# runs on the same tag would race on one GitHub Release.
 concurrency:
   group: release-main
   cancel-in-progress: false
-
-permissions:
-  contents: write
-  packages: write
 
 env:
   FJ_HOST: git.delnegend.com
@@ -41,21 +38,12 @@ jobs:
   prepare:
     name: Prepare
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
       target_ref: ${{ steps.version.outputs.target_ref }}
-      skip: ${{ steps.version.outputs.skip }}
     steps:
-      - name: Fetch source from Forgejo
-        uses: Vessel9457/actions/checkout@v2
-        with:
-          token: ${{ secrets.FORGEJO }}
-          repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
-          server_url: https://${{ env.FJ_HOST }}
-          path: src
-          ref: ${{ inputs.ref }}
-
-
       - name: Resolve Version from release tag
         id: version
         env:
@@ -69,7 +57,6 @@ jobs:
             VER="${INPUT_REF#v}"
             echo "version=$VER" >> "$GITHUB_OUTPUT"
             echo "target_ref=${INPUT_REF}" >> "$GITHUB_OUTPUT"
-            echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "resolved version: $VER (from input ref $INPUT_REF)"
             exit 0
           fi
@@ -92,11 +79,12 @@ jobs:
   build:
     name: Build Binaries (x86_64-unknown-linux-musl)
     needs: prepare
-    if: needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Fetch source from Forgejo
-        uses: Vessel9457/actions/checkout@v2
+        uses: Vessel9457/actions/checkout@v2 # tracks Delnegend/actions
         with:
           token: ${{ secrets.FORGEJO }}
           repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
@@ -140,13 +128,13 @@ jobs:
           sudo ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-linux-musl-gcc
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
           toolchain: stable
           targets: x86_64-unknown-linux-musl
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: x86_64-unknown-linux-musl
 
@@ -169,10 +157,10 @@ jobs:
           set -euo pipefail
           BASE="${BINARY_PREFIX}-${{ needs.prepare.outputs.version }}-linux-musl"
           mkdir -p "$BASE"
-          jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' \
-            cargo-build.json | sort -u | while read -r exe; do
-              cp "$exe" "$BASE/"
-            done
+          while read -r exe; do
+            cp "$exe" "$BASE/" || exit 1
+          done < <(jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' cargo-build.json | sort -u)
+          [ "$(ls -A "$BASE")" ] || { echo "::error::no executables packaged"; exit 1; }
           tar -czf "${BASE}.tar.gz" "$BASE"
           rm -rf "$BASE"
           ls -lh "${BASE}.tar.gz"
@@ -196,14 +184,13 @@ jobs:
   publish-image:
     name: Publish Container Image (ghcr.io)
     needs: prepare
-    if: needs.prepare.outputs.skip != 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
     steps:
       - name: Fetch source from Forgejo
-        uses: Vessel9457/actions/checkout@v2
+        uses: Vessel9457/actions/checkout@v2 # tracks Delnegend/actions
         with:
           token: ${{ secrets.FORGEJO }}
           repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
@@ -241,10 +228,10 @@ jobs:
           "
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -261,7 +248,7 @@ jobs:
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push container image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           file: apps/emsui-livecheck/Dockerfile
