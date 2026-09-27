@@ -15,7 +15,7 @@ on:
     inputs:
       ref:
         description: Forgejo release tag (e.g. v0.2.0)
-        required: true''
+        required: true
       correlation_id:
         description: Caller correlation id (echoed in the run name)
         required: false
