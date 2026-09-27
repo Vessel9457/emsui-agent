@@ -1,9 +1,11 @@
 # Release for the private Forgejo repo `Delnegend/emsui-agent`.
 #
-# The version is computed by ietf-tools/semver-action from the source repo's
-# Conventional Commits since the last release; artifacts (CLI binaries and
-# emsui-livecheck container image) are built here and published to Vessel9457's
-# GitHub Releases and GitHub Container Registry (ghcr.io).
+# The Forgejo `bump-version` workflow owns the version: it creates the
+# `vX.Y.Z` tag and dispatches here with that tag as `ref`. This workflow
+# never computes versions or creates tags — it only resolves the given tag
+# to a version string. Artifacts (CLI binaries and emsui-livecheck container
+# image) are built here and published to Vessel9457's GitHub Releases and
+# GitHub Container Registry (ghcr.io).
 # The Forgejo action mirrors the binary release back to Forgejo.
 
 name: release
@@ -12,9 +14,8 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: Forgejo release tag (e.g. v0.2.0) or ref to release (defaults to latest tag)
-        required: false
-        default: ''
+        description: Forgejo release tag (e.g. v0.2.0)
+        required: true''
       correlation_id:
         description: Caller correlation id (echoed in the run name)
         required: false
@@ -41,9 +42,9 @@ jobs:
     name: Prepare
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.version.outputs.version || steps.semver.outputs.nextStrict }}
-      target_ref: ${{ steps.version.outputs.target_ref || steps.semver.outputs.next }}
-      skip: ${{ steps.version.outputs.skip || steps.changes.outputs.skip }}
+      version: ${{ steps.version.outputs.version }}
+      target_ref: ${{ steps.version.outputs.target_ref }}
+      skip: ${{ steps.version.outputs.skip }}
     steps:
       - name: Fetch source from Forgejo
         uses: Vessel9457/actions/checkout@v2
@@ -54,28 +55,17 @@ jobs:
           path: src
           ref: ${{ inputs.ref }}
 
-      - name: Default to the latest verified release tag
-        if: inputs.ref == ''
-        working-directory: src
-        run: |
-          set -euo pipefail
-          LATEST_TAG="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n1 || true)"
-          if [ -n "$LATEST_TAG" ]; then
-            echo "No ref specified; defaulting to latest verified release tag: $LATEST_TAG"
-            git checkout --quiet "$LATEST_TAG"
-          else
-            echo "No release tag found; staying on the default branch"
-          fi
 
-      - name: Resolve Version from ref, tag, or Cargo.toml
+      - name: Resolve Version from release tag
         id: version
         env:
           INPUT_REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
 
-          # 1. If input ref is a version tag (e.g. v0.2.0 or 0.2.0), use it directly
-          if echo "$INPUT_REF" | grep -qE '^v?[0-9]+\.[0-9]+\.[0-9]+'; then
+          # The Forgejo `bump-version` workflow always dispatches with the
+          # release tag (e.g. v0.2.0). Anything else is a caller error.
+          if echo "$INPUT_REF" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
             VER="${INPUT_REF#v}"
             echo "version=$VER" >> "$GITHUB_OUTPUT"
             echo "target_ref=${INPUT_REF}" >> "$GITHUB_OUTPUT"
@@ -84,61 +74,8 @@ jobs:
             exit 0
           fi
 
-          # 2. Check if git commit has an exact tag
-          TAG="$(git -C src describe --tags --match 'v*' --exact-match 2>/dev/null || true)"
-          if [ -n "$TAG" ]; then
-            VER="${TAG#v}"
-            echo "version=$VER" >> "$GITHUB_OUTPUT"
-            echo "target_ref=${TAG}" >> "$GITHUB_OUTPUT"
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "resolved version: $VER (from exact git tag $TAG)"
-            exit 0
-          fi
-
-          # 3. Check if Cargo.toml on this commit is already bumped beyond the latest tag
-          LAST="$(git -C src describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)"
-          CARGO_VER="$(grep -m1 '^version =' src/Cargo.toml | cut -d'"' -f2)"
-          if [ -n "$LAST" ] && [ "$CARGO_VER" != "${LAST#v}" ]; then
-            echo "version=$CARGO_VER" >> "$GITHUB_OUTPUT"
-            echo "target_ref=v${CARGO_VER}" >> "$GITHUB_OUTPUT"
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-            echo "resolved version: $CARGO_VER (from bumped Cargo.toml)"
-            exit 0
-          fi
-
-          echo "need_semver=true" >> "$GITHUB_OUTPUT"
-      - name: Collect source commits since the last release
-        id: changes
-        if: steps.version.outputs.need_semver == 'true'
-        run: |
-          set -euo pipefail
-          LAST="$(git -C src describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)"
-          if [ -n "$LAST" ]; then RANGE="${LAST}..HEAD"; else RANGE="HEAD"; fi
-
-          COUNT="$(git -C src rev-list --count "$RANGE")"
-          echo "source commits since ${LAST:-the beginning}: ${COUNT}"
-          if [ "$COUNT" -eq 0 ]; then
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "skip=false" >> "$GITHUB_OUTPUT"
-          {
-            echo 'messages<<EOF'
-            git -C src log --pretty=format:%s "$RANGE"
-            echo
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Next version (fallback)
-        id: semver
-        if: steps.version.outputs.need_semver == 'true' && steps.changes.outputs.skip != 'true'
-        uses: ietf-tools/semver-action@v1
-        with:
-          token: ${{ github.token }}
-          fallbackTag: v0.0.0
-          additionalCommits: ${{ steps.changes.outputs.messages }}
-          noVersionBumpBehavior: patch
+          echo "::error::release ref must be a version tag (e.g. v0.2.0), got '${INPUT_REF}'"
+          exit 1
 
   build:
     name: Build Binaries (x86_64-unknown-linux-musl)
