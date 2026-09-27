@@ -101,9 +101,9 @@ jobs:
             echo "::error::set the GLOBAL_CLIENT_CRT and GLOBAL_CLIENT_KEY repository secrets"
             exit 1
           }
-          mkdir -p certs
-          printf '%s\n' "$GLOBAL_CLIENT_CRT" > certs/global_client.crt
-          printf '%s\n' "$GLOBAL_CLIENT_KEY" > certs/global_client.key
+          mkdir -p .certs
+          printf '%s\n' "$GLOBAL_CLIENT_CRT" > .certs/global_client.crt
+          printf '%s\n' "$GLOBAL_CLIENT_KEY" > .certs/global_client.key
 
       - name: Update Cargo.toml workspace version
         env:
@@ -208,9 +208,9 @@ jobs:
             echo "::error::set the GLOBAL_CLIENT_CRT and GLOBAL_CLIENT_KEY repository secrets"
             exit 1
           }
-          mkdir -p certs
-          printf '%s\n' "$GLOBAL_CLIENT_CRT" > certs/global_client.crt
-          printf '%s\n' "$GLOBAL_CLIENT_KEY" > certs/global_client.key
+          mkdir -p .certs
+          printf '%s\n' "$GLOBAL_CLIENT_CRT" > .certs/global_client.crt
+          printf '%s\n' "$GLOBAL_CLIENT_KEY" > .certs/global_client.key
 
       - name: Update Cargo.toml workspace version
         env:
