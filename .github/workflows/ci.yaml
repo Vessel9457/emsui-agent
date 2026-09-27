@@ -22,12 +22,16 @@ on:
 
 run-name: "ci ${{ inputs.correlation_id || github.sha }}"
 
-# Queued CI runs for the same ref are redundant: the newer run checks a
-# superset of the older's commits. Cancel the stale run instead of burning
-# two runners on back-to-back pushes. (Releases serialize separately in
-# `release.yaml` and must never cancel.)
+# Queued CI runs are redundant: the newer run checks a superset of the
+# older's commits. Cancel the stale run instead of burning two runners on
+# back-to-back pushes. (Releases serialize separately in `release.yaml` and
+# must never cancel.)
+# NOTE: the group MUST be a stable key. Grouping on `inputs.ref` (a unique
+# commit SHA per dispatch) or `inputs.correlation_id` (unique per trigger)
+# never collides, so `cancel-in-progress` would be dead code. This repo only
+# builds `main` on a single branch, so a static group is correct.
 concurrency:
-  group: ci-${{ inputs.ref || 'main' }}
+  group: ci-main
   cancel-in-progress: true
 
 permissions:
@@ -70,15 +74,15 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends clang mold
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
         with:
           toolchain: stable
           components: rustfmt, clippy
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
 
-      - uses: extractions/setup-just@v3
+      - uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
 
       - name: Run checks
         run: just check
