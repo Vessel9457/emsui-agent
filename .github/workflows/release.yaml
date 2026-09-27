@@ -179,7 +179,7 @@ jobs:
           gh release create "$VERSION" "${ASSET}" \
             --repo "${GITHUB_REPOSITORY}" \
             --title "$VERSION" \
-            --notes "Built from ${FJ_OWNER}/${GITHUB_REPOSITORY#*/}@${TARGET_REF}."
+            --notes "To be disclosed"
 
   publish-image:
     name: Publish Container Image (ghcr.io)
