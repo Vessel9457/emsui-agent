@@ -77,6 +77,18 @@ jobs:
           echo "::error::release ref must be a version tag (e.g. v0.2.0), got '${INPUT_REF}'"
           exit 1
 
+      - name: Fail if this version was already released
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "v${VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "::error::release v${VERSION} already exists on ${GITHUB_REPOSITORY} — delete it first (gh release delete v${VERSION} --repo ${GITHUB_REPOSITORY} --yes), then re-run"
+            exit 1
+          fi
+          echo "no existing release v${VERSION}; proceeding"
+
   build:
     name: Build Binaries (x86_64-unknown-linux-musl)
     needs: prepare
