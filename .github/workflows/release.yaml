@@ -93,6 +93,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "resolved version: $VER (from exact git tag $TAG)"
             exit 0
+          fi
 
           # 3. Check if Cargo.toml on this commit is already bumped beyond the latest tag
           LAST="$(git -C src describe --tags --match 'v*' --abbrev=0 2>/dev/null || true)"
@@ -103,6 +104,7 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
             echo "resolved version: $CARGO_VER (from bumped Cargo.toml)"
             exit 0
+          fi
 
           echo "need_semver=true" >> "$GITHUB_OUTPUT"
       - name: Collect source commits since the last release
