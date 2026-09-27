@@ -22,6 +22,14 @@ on:
 
 run-name: "ci ${{ inputs.correlation_id || github.sha }}"
 
+# Queued CI runs for the same ref are redundant: the newer run checks a
+# superset of the older's commits. Cancel the stale run instead of burning
+# two runners on back-to-back pushes. (Releases serialize separately in
+# `release.yaml` and must never cancel.)
+concurrency:
+  group: ci-${{ inputs.ref || 'main' }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
