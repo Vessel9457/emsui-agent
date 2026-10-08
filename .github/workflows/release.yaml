@@ -1,10 +1,12 @@
 # Release for the private Forgejo repo `Delnegend/emsui-agent`.
 #
-# The Forgejo `bump-version` workflow owns the version: it creates the
-# `vX.Y.Z` tag and dispatches here with that tag as `ref`. This workflow
-# never computes versions or creates tags — it only resolves the given tag
-# to a version string. Artifacts (CLI binaries and emsui-livecheck container
-# image) are built here and published to Vessel9457's GitHub Releases and
+# Three targets, dispatched by the Forgejo `release` workflow:
+#   new-tag (default) — dispatched with the new `vX.Y.Z` tag; builds the tag
+#     and publishes artifacts.
+#   tag    — rebuild an existing tag (repair path); builds and publishes.
+#   commit — test-build a commit SHA; artifacts go to the Actions run only,
+#     no GitHub Release, no container push.
+# Artifacts (CLI binaries and container image) publish to GitHub Releases and
 # GitHub Container Registry (ghcr.io).
 # The Forgejo action mirrors the binary release back to Forgejo.
 
@@ -13,8 +15,17 @@ name: release
 on:
   workflow_dispatch:
     inputs:
+      target:
+        description: Release mode / build target
+        required: true
+        type: choice
+        default: new-tag
+        options:
+          - new-tag
+          - tag
+          - commit
       ref:
-        description: Forgejo release tag (e.g. v0.2.0)
+        description: Tag (new-tag/tag) or commit SHA (commit)
         required: true
       correlation_id:
         description: Caller correlation id (echoed in the run name)
@@ -22,8 +33,8 @@ on:
 
 run-name: "release ${{ inputs.correlation_id || github.sha }}"
 
-# Serialise releases: dispatch requires the release tag, so concurrent
-# runs on the same tag would race on one GitHub Release.
+# Serialise releases: concurrent runs on the same tag would race on one
+# GitHub Release.
 concurrency:
   group: release-main
   cancel-in-progress: false
@@ -32,7 +43,7 @@ env:
   FJ_HOST: git.delnegend.com
   FJ_OWNER: Delnegend
   BINARY_PREFIX: emsui-agent
-  IMAGE_NAME: ghcr.io/vessel9457/emsui-livecheck
+  IMAGE_NAME: ghcr.io/vessel9457/emsui-admincheck
 
 jobs:
   prepare:
@@ -41,33 +52,46 @@ jobs:
     permissions:
       contents: read
     outputs:
-      version: ${{ steps.version.outputs.version }}
-      target_ref: ${{ steps.version.outputs.target_ref }}
+      version: ${{ steps.resolve.outputs.version }}
+      target_ref: ${{ steps.resolve.outputs.target_ref }}
+      publish: ${{ steps.resolve.outputs.publish }}
     steps:
-      - name: Resolve Version from release tag
-        id: version
+      - name: Resolve Version and Publish Flag
+        id: resolve
         env:
+          INPUT_TARGET: ${{ inputs.target }}
           INPUT_REF: ${{ inputs.ref }}
         run: |
           set -euo pipefail
 
-          # The Forgejo `bump-version` workflow always dispatches with the
-          # release tag (e.g. v0.2.0). Anything else is a caller error.
+          if [ "$INPUT_TARGET" = "commit" ]; then
+            # Test build: any commit SHA, no tag, no version, no publish.
+            echo "$INPUT_REF" | grep -qE '^[0-9a-f]{4,64}$' || { echo "::error::commit target needs a commit SHA, got '${INPUT_REF}'"; exit 1; }
+            echo "version=$INPUT_REF" >> "$GITHUB_OUTPUT"
+            echo "target_ref=$INPUT_REF" >> "$GITHUB_OUTPUT"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "test build against commit $INPUT_REF (will not publish)"
+            exit 0
+          fi
+
+          # new-tag and tag both build a version tag and publish.
           if echo "$INPUT_REF" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
             VER="${INPUT_REF#v}"
             echo "version=$VER" >> "$GITHUB_OUTPUT"
             echo "target_ref=${INPUT_REF}" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
             echo "resolved version: $VER (from input ref $INPUT_REF)"
             exit 0
           fi
 
-          echo "::error::release ref must be a version tag (e.g. v0.2.0), got '${INPUT_REF}'"
+          echo "::error::tag target needs a version tag (e.g. v0.2.0), got '${INPUT_REF}'"
           exit 1
 
       - name: Fail if this version was already released
+        if: steps.resolve.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ steps.resolve.outputs.version }}
         run: |
           set -euo pipefail
           if gh release view "v${VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
@@ -106,6 +130,7 @@ jobs:
           printf '%s\n' "$GLOBAL_CLIENT_KEY" > .certs/global_client.key
 
       - name: Update Cargo.toml workspace version
+        if: needs.prepare.outputs.publish == 'true'
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
@@ -153,9 +178,16 @@ jobs:
             --message-format=json-render-diagnostics > cargo-build.json
 
       - name: Package
+        env:
+          REF_SLUG: ${{ needs.prepare.outputs.target_ref }}
         run: |
           set -euo pipefail
-          BASE="${BINARY_PREFIX}-${{ needs.prepare.outputs.version }}-linux-musl"
+          # Test builds (commit target) have no version: name the tarball by short SHA.
+          if [ "${{ needs.prepare.outputs.publish }}" = "true" ]; then
+            BASE="${BINARY_PREFIX}-${{ needs.prepare.outputs.version }}-linux-musl"
+          else
+            BASE="${BINARY_PREFIX}-${REF_SLUG}-linux-musl"
+          fi
           mkdir -p "$BASE"
           while read -r exe; do
             cp "$exe" "$BASE/" || exit 1
@@ -166,8 +198,16 @@ jobs:
           ls -lh "${BASE}.tar.gz"
           echo "ASSET=${BASE}.tar.gz" >> "$GITHUB_ENV"
 
+      - name: Upload test-build artifacts
+        if: needs.prepare.outputs.publish != 'true'
+        uses: actions/upload-artifact@ea3b3a085bfaec3d7e771450a63e08477b172cd29 # v4
+        with:
+          name: build-artifacts-${{ needs.prepare.outputs.target_ref }}
+          path: ${{ env.ASSET }}
+          if-no-files-found: error
 
       - name: Create GitHub Release on Vessel9457
+        if: needs.prepare.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: v${{ needs.prepare.outputs.version }}
@@ -212,6 +252,7 @@ jobs:
           printf '%s\n' "$GLOBAL_CLIENT_KEY" > .certs/global_client.key
 
       - name: Update Cargo.toml workspace version
+        if: needs.prepare.outputs.publish == 'true'
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
@@ -248,10 +289,11 @@ jobs:
           echo "tags=${TAGS}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push container image
+        if: needs.prepare.outputs.publish == 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
-          file: apps/emsui-livecheck/Dockerfile
+          file: apps/emsui-admincheck/Dockerfile
           push: true
           build-args: VERSION=${{ needs.prepare.outputs.version }}
           tags: ${{ steps.tags.outputs.tags }}
