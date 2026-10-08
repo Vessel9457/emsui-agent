@@ -224,6 +224,7 @@ jobs:
   publish-image:
     name: Publish Container Image (ghcr.io)
     needs: prepare
+    if: needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
