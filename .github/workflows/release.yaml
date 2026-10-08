@@ -101,7 +101,7 @@ jobs:
           echo "no existing release v${VERSION}; proceeding"
 
   build:
-    name: Build Binaries (x86_64-unknown-linux-musl)
+    name: Build Binaries (x86_64-unknown-linux-musl + GUI glibc)
     needs: prepare
     runs-on: ubuntu-26.04
     permissions:
@@ -146,7 +146,7 @@ jobs:
               f.write(content)
           "
 
-      - name: Install clang + mold + musl toolchain
+      - name: Install clang + mold + musl toolchain + GTK4/Adwaita libs
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq --no-install-recommends clang mold musl-tools libgtk-4-dev libadwaita-1-dev
@@ -163,19 +163,26 @@ jobs:
         with:
           key: x86_64-unknown-linux-musl
 
-      - name: Synchronize Cargo.lock
+      - name: Synchronize Cargo.lock (musl, no GUI)
         run: |
           set -euo pipefail
-          cargo check --workspace --target x86_64-unknown-linux-musl
+          # emsui-linux needs system GTK (glibc): it never links static musl.
+          cargo check --workspace --exclude emsui-linux --target x86_64-unknown-linux-musl
 
-      - name: Build
+      - name: Build (musl, no GUI)
         env:
           RUSTFLAGS: "-C linker=clang -C link-arg=--target=x86_64-unknown-linux-musl -C link-arg=-fuse-ld=mold"
           CC_x86_64_unknown_linux_musl: musl-gcc
         run: |
           set -euo pipefail
-          cargo build --workspace --release --target x86_64-unknown-linux-musl \
-            --message-format=json-render-diagnostics > cargo-build.json
+          cargo build --workspace --exclude emsui-linux --release --target x86_64-unknown-linux-musl \
+            --message-format=json-render-diagnostics > cargo-build-musl.json
+
+      - name: Build GUI (glibc, system GTK)
+        run: |
+          set -euo pipefail
+          cargo build -p emsui-linux --release \
+            --message-format=json-render-diagnostics > cargo-build-gui.json
 
       - name: Package
         env:
@@ -184,14 +191,14 @@ jobs:
           set -euo pipefail
           # Test builds (commit target) have no version: name the tarball by short SHA.
           if [ "${{ needs.prepare.outputs.publish }}" = "true" ]; then
-            BASE="${BINARY_PREFIX}-${{ needs.prepare.outputs.version }}-linux-musl"
+            BASE="${BINARY_PREFIX}-${{ needs.prepare.outputs.version }}-linux"
           else
-            BASE="${BINARY_PREFIX}-${REF_SLUG}-linux-musl"
+            BASE="${BINARY_PREFIX}-${REF_SLUG}-linux"
           fi
           mkdir -p "$BASE"
           while read -r exe; do
             cp "$exe" "$BASE/" || exit 1
-          done < <(jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' cargo-build.json | sort -u)
+          done < <(jq -r 'select(.reason == "compiler-artifact" and .executable != null) | .executable' cargo-build-musl.json cargo-build-gui.json | sort -u)
           [ "$(ls -A "$BASE")" ] || { echo "::error::no executables packaged"; exit 1; }
           tar -czf "${BASE}.tar.gz" "$BASE"
           rm -rf "$BASE"
