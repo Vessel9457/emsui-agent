@@ -44,7 +44,7 @@ env:
 jobs:
   check:
     name: Check (just check)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: Fetch source from Forgejo
         uses: Vessel9457/actions/checkout@v2
@@ -68,10 +68,10 @@ jobs:
           printf '%s\n' "$GLOBAL_CLIENT_CRT" > .certs/global_client.crt
           printf '%s\n' "$GLOBAL_CLIENT_KEY" > .certs/global_client.key
 
-      - name: Install clang + mold
+      - name: Install clang + mold + GTK4/Adwaita system libs
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends clang mold
+          sudo apt-get install -y -qq --no-install-recommends clang mold libgtk-4-dev libadwaita-1-dev
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
