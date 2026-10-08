@@ -26,12 +26,8 @@ run-name: "ci ${{ inputs.correlation_id || github.sha }}"
 # older's commits. Cancel the stale run instead of burning two runners on
 # back-to-back pushes. (Releases serialize separately in `release.yaml` and
 # must never cancel.)
-# NOTE: the group MUST be a stable key. Grouping on `inputs.ref` (a unique
-# commit SHA per dispatch) or `inputs.correlation_id` (unique per trigger)
-# never collides, so `cancel-in-progress` would be dead code. This repo only
-# builds `main` on a single branch, so a static group is correct.
 concurrency:
-  group: ci-main
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
