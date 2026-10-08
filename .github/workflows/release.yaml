@@ -200,7 +200,7 @@ jobs:
 
       - name: Upload test-build artifacts
         if: needs.prepare.outputs.publish != 'true'
-        uses: actions/upload-artifact@ea3b3a085bfaec3d7e771450a63e08477b172cd29 # v4
+        uses: actions/upload-artifact@v4 # v4
         with:
           name: build-artifacts-${{ needs.prepare.outputs.target_ref }}
           path: ${{ env.ASSET }}
