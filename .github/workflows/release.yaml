@@ -48,7 +48,7 @@ env:
 jobs:
   prepare:
     name: Prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
     outputs:
@@ -103,7 +103,7 @@ jobs:
   build:
     name: Build Binaries (x86_64-unknown-linux-musl)
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: write
     steps:
@@ -149,7 +149,7 @@ jobs:
       - name: Install clang + mold + musl toolchain
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends clang mold musl-tools
+          sudo apt-get install -y -qq --no-install-recommends clang mold musl-tools libgtk-4-dev libadwaita-1-dev
           sudo ln -sf /usr/bin/musl-gcc /usr/local/bin/x86_64-linux-musl-gcc
 
       - name: Setup Rust
@@ -225,7 +225,7 @@ jobs:
     name: Publish Container Image (ghcr.io)
     needs: prepare
     if: needs.prepare.outputs.publish == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       packages: write
