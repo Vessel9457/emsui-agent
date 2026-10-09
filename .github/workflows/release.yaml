@@ -108,7 +108,7 @@ jobs:
       contents: write
     steps:
       - name: Fetch source from Forgejo
-        uses: Vessel9457/actions/checkout@v2 # tracks Delnegend/actions
+        uses: Vessel9457/actions/checkout@v2 # tracks Delnegend/actions  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag
         with:
           token: ${{ secrets.FORGEJO }}
           repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
@@ -187,11 +187,13 @@ jobs:
       - name: Package
         env:
           REF_SLUG: ${{ needs.prepare.outputs.target_ref }}
+          PUBLISH: ${{ needs.prepare.outputs.publish }}
+          APP_VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           set -euo pipefail
           # Test builds (commit target) have no version: name the tarball by short SHA.
-          if [ "${{ needs.prepare.outputs.publish }}" = "true" ]; then
-            BASE="${BINARY_PREFIX}-${{ needs.prepare.outputs.version }}-linux"
+          if [ "$PUBLISH" = "true" ]; then
+            BASE="${BINARY_PREFIX}-${APP_VERSION}-linux"
           else
             BASE="${BINARY_PREFIX}-${REF_SLUG}-linux"
           fi
@@ -207,7 +209,7 @@ jobs:
 
       - name: Upload test-build artifacts
         if: needs.prepare.outputs.publish != 'true'
-        uses: actions/upload-artifact@v4 # v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: build-artifacts-${{ needs.prepare.outputs.target_ref }}
           path: ${{ env.ASSET }}
@@ -238,7 +240,7 @@ jobs:
       packages: write
     steps:
       - name: Fetch source from Forgejo
-        uses: Vessel9457/actions/checkout@v2 # tracks Delnegend/actions
+        uses: Vessel9457/actions/checkout@v2 # tracks Delnegend/actions  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag
         with:
           token: ${{ secrets.FORGEJO }}
           repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
