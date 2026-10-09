@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Fetch source from Forgejo
-        uses: Vessel9457/actions/checkout@v2  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag
+        uses: Vessel9457/actions/checkout@v2  # nosemgrep
         with:
           token: ${{ secrets.FORGEJO }}
           repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Fetch source from Forgejo
-        uses: Vessel9457/actions/checkout@v2  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag
+        uses: Vessel9457/actions/checkout@v2  # nosemgrep
         with:
           token: ${{ secrets.FORGEJO }}
           repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
@@ -110,7 +110,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Fetch source from Forgejo
-        uses: Vessel9457/actions/checkout@v2  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag
+        uses: Vessel9457/actions/checkout@v2  # nosemgrep
         with:
           token: ${{ secrets.FORGEJO }}
           repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
@@ -125,7 +125,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Fetch source from Forgejo
-        uses: Vessel9457/actions/checkout@v2  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag
+        uses: Vessel9457/actions/checkout@v2  # nosemgrep
         with:
           token: ${{ secrets.FORGEJO }}
           repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
@@ -140,7 +140,7 @@ jobs:
     runs-on: ubuntu-26.04
     steps:
       - name: Fetch source from Forgejo
-        uses: Vessel9457/actions/checkout@v2  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag
+        uses: Vessel9457/actions/checkout@v2  # nosemgrep
         with:
           token: ${{ secrets.FORGEJO }}
           repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}

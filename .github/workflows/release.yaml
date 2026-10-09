@@ -108,7 +108,7 @@ jobs:
       contents: write
     steps:
       - name: Fetch source from Forgejo
-        uses: Vessel9457/actions/checkout@v2 # tracks Delnegend/actions  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag
+        uses: Vessel9457/actions/checkout@v2 # tracks Delnegend/actions  # nosemgrep
         with:
           token: ${{ secrets.FORGEJO }}
           repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
@@ -240,7 +240,7 @@ jobs:
       packages: write
     steps:
       - name: Fetch source from Forgejo
-        uses: Vessel9457/actions/checkout@v2 # tracks Delnegend/actions  # nosemgrep: yaml.github-actions.security.github-actions-mutable-action-tag
+        uses: Vessel9457/actions/checkout@v2 # tracks Delnegend/actions  # nosemgrep
         with:
           token: ${{ secrets.FORGEJO }}
           repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
