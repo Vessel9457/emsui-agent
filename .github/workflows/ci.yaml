@@ -65,6 +65,12 @@ jobs:
           printf '%s\n' "$GLOBAL_CLIENT_CRT" > .certs/global_client.crt
           printf '%s\n' "$GLOBAL_CLIENT_KEY" > .certs/global_client.key
 
+      - name: Cache apt packages
+        uses: actions/cache@v4
+        with:
+          path: /var/cache/apt/archives
+          key: apt-${{ runner.os }}-${{ hashFiles('.github/workflows/ci.yaml') }}
+
       - name: Install clang + mold + GTK4/Adwaita system libs
         run: |
           sudo apt-get update -qq
