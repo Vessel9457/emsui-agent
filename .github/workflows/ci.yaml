@@ -2,8 +2,9 @@
 #
 # This repository is public only so GitHub-hosted runners are free; it holds no
 # source. The workflow checks the private source out of Forgejo with a read-only
-# token (`secrets.FORGEJO`) and runs the single `just check` gate. Building and
-# shipping binaries is the Release workflow's job.
+# token (`secrets.FORGEJO`) and runs the `just check` gate plus secret, SAST,
+# container, and dependency scans in parallel. Building and shipping binaries
+# is the Release workflow's job.
 #
 # A Forgejo Action dispatches this via `workflow_dispatch` and waits for the run.
 
@@ -82,3 +83,63 @@ jobs:
 
       - name: Run checks
         run: just check
+
+  secret-scan:
+    name: Secret Scanning (Gitleaks)
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Fetch source from Forgejo
+        uses: Vessel9457/actions/checkout@v2
+        with:
+          token: ${{ secrets.FORGEJO }}
+          repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
+          server_url: https://${{ env.FJ_HOST }}
+          ref: ${{ inputs.ref || 'main' }}
+
+      - name: Run Gitleaks
+        run: docker run --rm -v "${{ github.workspace }}:/path" zricethezav/gitleaks:latest detect --source="/path" --verbose
+
+  sast-scan:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Fetch source from Forgejo
+        uses: Vessel9457/actions/checkout@v2
+        with:
+          token: ${{ secrets.FORGEJO }}
+          repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
+          server_url: https://${{ env.FJ_HOST }}
+          ref: ${{ inputs.ref || 'main' }}
+
+      - name: Run Semgrep OSS
+        run: docker run --rm -v "${{ github.workspace }}:/src" returntocorp/semgrep semgrep scan --config=auto --error
+
+  trivy-scan:
+    name: Container & Infra (Trivy)
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Fetch source from Forgejo
+        uses: Vessel9457/actions/checkout@v2
+        with:
+          token: ${{ secrets.FORGEJO }}
+          repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
+          server_url: https://${{ env.FJ_HOST }}
+          ref: ${{ inputs.ref || 'main' }}
+
+      - name: Run Trivy (OS packages & Misconfigurations)
+        run: docker run --rm -v "${{ github.workspace }}:/src" aquasec/trivy fs /src --severity HIGH,CRITICAL --exit-code 1
+
+  osv-scan:
+    name: Dependencies (OSV-Scanner)
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Fetch source from Forgejo
+        uses: Vessel9457/actions/checkout@v2
+        with:
+          token: ${{ secrets.FORGEJO }}
+          repository: ${{ env.FJ_OWNER }}/${{ github.event.repository.name }}
+          server_url: https://${{ env.FJ_HOST }}
+          ref: ${{ inputs.ref || 'main' }}
+
+      - name: Run OSV-Scanner
+        run: docker run --rm -v "${{ github.workspace }}:/src" ghcr.io/google/osv-scanner:latest --recursive /src
